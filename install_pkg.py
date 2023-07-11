@@ -42,7 +42,10 @@ def lookup_zrif_by_pkg_direct_link(tsv_file, pkg_name):
     # Get the value of the 'zRIF' field from the matching row
     zrif_value = matching_row[zrif_field].values[0]
 
-    return zrif_value
+    if len(zrif_value) > 0:
+        return zrif_value
+    else:
+        return None
 
 
 def install_pkg(vita3k_prog_path, pkg_file_path, zrif):
