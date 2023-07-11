@@ -25,7 +25,7 @@ def lookup_zrif_by_game_name(tsv_file, name):
     df = pd.read_csv(tsv_file, delimiter='\t')
     result = df[df['Name'] == name]
     if not result.empty:
-        return result.iloc[0].to_dict()
+        return result.iloc[0].to_dict()["zRIF"]
     return None
 
 # Lookup a game zRIF using the 'PKG direct link' column in TSV file
@@ -97,19 +97,6 @@ def extract_text(text):
     if matches:
         extracted_text = matches.group(1)
         return extracted_text
-
-def lookup_zrif_by_game_name(tsv_file, game_name):
-    result = lookup_zrif_by_game_name(tsv_file, game_name)
-    zrif = ""
-
-    if result is not None:
-        zrif = result["zRIF"]
-        return zrif
-    else:
-        print("Name not found in the TSV file.")
-        list_games_no_matching_zrif.append(game_name)
-        return None
-
    
 if __name__ == "__main__":
 
