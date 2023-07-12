@@ -22,29 +22,36 @@ SEP = "------------------------------------------"
 
 # Lookup a game zRIF using the 'Name' column in TSV file
 def lookup_zrif_by_game_name(tsv_file, name):
-    df = pd.read_csv(tsv_file, delimiter='\t')
-    result = df[df['Name'] == name]
-    if not result.empty:
-        return result.iloc[0].to_dict()["zRIF"]
-    return None
+    try:
+        df = pd.read_csv(tsv_file, delimiter='\t')
+        result = df[df['Name'] == name]
+        if not result.empty:
+            return result.iloc[0].to_dict()["zRIF"]
+    except:
+        return None
 
-# Lookup a game zRIF using the 'PKG direct link' column in TSV file
 def lookup_zrif_by_pkg_direct_link(tsv_file, pkg_name):
     search_text = pkg_name
     field_name = 'PKG direct link'
     zrif_field = 'zRIF'
 
-    data = pd.read_csv(tsv_file, delimiter='\t')
+    try:
+        data = pd.read_csv(tsv_file, delimiter='\t')
 
-    # Find the row that contains a partial match for the search text in the specified field
-    matching_row = data[data[field_name].str.contains(search_text, na=False)]
+        # Find the row that contains a partial match for the search text in the specified field
+        matching_row = data[data[field_name].str.contains(search_text, na=False)]
 
-    # Get the value of the 'zRIF' field from the matching row
-    zrif_value = matching_row[zrif_field].values[0]
+        if len(matching_row) > 0:
+            # Get the value of the 'zRIF' field from the matching row
+            zrif_value = matching_row[zrif_field].values[0]
 
-    if len(zrif_value) > 0:
-        return zrif_value
-    else:
+            if len(zrif_value) > 0:
+                return zrif_value
+            else:
+                return None
+        else:
+            return None
+    except:
         return None
 
 
