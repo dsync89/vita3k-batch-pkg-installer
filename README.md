@@ -22,3 +22,33 @@ Finished installing 2 pkg!
 Failed to install 0 pkg!
 0 games with no matching zrif!
 ```
+
+# Getting Started
+
+### Microsoft Windows users
+
+1. Download and install Python 3.x for Windows OS:
+
+   https://www.python.org/downloads/windows/
+
+2. Install module 'pandas' for Python by opening the Windows CMD and executing the following command:
+
+       python.exe -m pip install pandas
+
+3. Open file 'install_pkg.py' in notepad, and set the right directory paths in these lines:
+
+       # folder that contains all the .pkg games downloaded from NoPayStation.com
+       INPUT_PKG_FOLDER = "C:\\Packages"
+
+       # Path to vita3k emulator
+       VITA3K_PROG_PATH = "C:\\Vita3K\\Vita3K.exe"
+
+	(notice the usage of two backslashes "\\" to separate folder names as shown above.)
+
+	Save the file changes when you are done.
+
+4. Run the script file 'install_pkg.py' by doing double click on it, and wait until the batch file operation is completed.
+
+That's all.
+
+That's all.
