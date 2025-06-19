@@ -1,4 +1,3 @@
-````markdown
 # 📦 vita3k-batch-pkg-installer
 
 Batch install `.pkg` files into **Vita3K** with `zRIF` codes — now with **GUI**, **config saving**, and **cross-platform support**.
