@@ -3,139 +3,370 @@ import sys
 import os
 import subprocess
 import re
+from pathlib import Path
 
-# Provide the TSV file path and the name to lookup
-TSV_FILE = 'PSV_GAMES.tsv'
+# Configuration
+TSV_FILES = {
+    'games': "/home/relyf/Tools/vita3k-batch-pkg-installer-main/PSV_GAMES.tsv",
+    'dlcs': "/home/relyf/Tools/vita3k-batch-pkg-installer-main/PSV_DLCS.tsv",
+    'themes': "/home/relyf/Tools/vita3k-batch-pkg-installer-main/PSV_THEMES.tsv"
+}
+INPUT_PKG_FOLDER = "/home/relyf/Tools/NPS/PKG"
+VITA3K_PROG_PATH = "/home/relyf/Vita3K/Vita3K"
 
-# folder that contains all the .pkg games downloaded from NoPayStation
-INPUT_PKG_FOLDER = "s:\\roms-staging\\vita extract"
-
-# Path to vita3k emulator
-VITA3K_PROG_PATH = "C:\\Programs\\LaunchBox\\Emulators\\Vita 3k\\Vita3K.exe"
-
-# list that stores the game name for summary
-list_pkg_install_success = [] # list of pkg that installed successfully
-list_pkg_install_fail = [] # list of pkg that failed to install
-list_games_no_matching_zrif = [] # list of game that failed to lookup zrif from TSV file
+# Statistics tracking
+stats = {
+    'games': {'success': [], 'failed': [], 'no_zrif': [], 'deleted': []},
+    'dlcs': {'success': [], 'failed': [], 'no_zrif': [], 'deleted': []},
+    'themes': {'success': [], 'failed': [], 'no_zrif': [], 'deleted': []}
+}
 
 SEP = "------------------------------------------"
 
-# Lookup a game zRIF using the 'Name' column in TSV file
-def lookup_zrif_by_game_name(tsv_file, name):
+def get_content_type(content_id):
+    """Determine content type based on Content ID pattern"""
+    if not content_id:
+        return 'unknown'
+    
+    # Games typically end with _00
+    if content_id.endswith('_00'):
+        return 'games'
+    # DLCs typically have patterns like _01, _02, etc. or contain 'DLC'
+    elif re.search(r'_\d{2}$', content_id) and not content_id.endswith('_00'):
+        return 'dlcs'
+    elif 'DLC' in content_id.upper():
+        return 'dlcs'
+    # Themes often contain 'THEME' or have specific patterns
+    elif 'THEME' in content_id.upper():
+        return 'themes'
+    else:
+        return 'games'  # Default to games if uncertain
+
+def lookup_zrif_by_content_id(content_id, content_type):
+    """Lookup zRIF using Content ID from appropriate TSV file"""
+    tsv_file = TSV_FILES.get(content_type)
+    if not tsv_file or not os.path.exists(tsv_file):
+        print(f"Warning: TSV file {tsv_file} for {content_type} not found")
+        return None
+    
     try:
         df = pd.read_csv(tsv_file, delimiter='\t')
-        result = df[df['Name'] == name]
+        result = df[df['Content ID'] == content_id]
         if not result.empty:
-            return result.iloc[0].to_dict()["zRIF"]
-    except:
+            zrif = result.iloc[0]['zRIF']
+            return zrif if pd.notna(zrif) and len(str(zrif).strip()) > 0 else None
+        return None
+    except Exception as e:
+        print(f"Error reading TSV file {tsv_file}: {e}")
         return None
 
-def lookup_zrif_by_pkg_direct_link(tsv_file, pkg_name):
-    search_text = pkg_name
-    field_name = 'PKG direct link'
-    zrif_field = 'zRIF'
-
+def lookup_zrif_by_pkg_filename(pkg_filename, content_type):
+    """Fallback method: lookup by PKG filename in direct link from appropriate TSV"""
+    tsv_file = TSV_FILES.get(content_type)
+    if not tsv_file or not os.path.exists(tsv_file):
+        return None, None
+    
     try:
-        data = pd.read_csv(tsv_file, delimiter='\t')
+        df = pd.read_csv(tsv_file, delimiter='\t')
+        
+        # Remove file extension for matching
+        pkg_name_no_ext = os.path.splitext(pkg_filename)[0]
+        
+        # Try exact filename match first
+        matching_rows = df[df['PKG direct link'].str.contains(pkg_filename, na=False, case=False)]
+        
+        if matching_rows.empty:
+            # Try without extension
+            matching_rows = df[df['PKG direct link'].str.contains(pkg_name_no_ext, na=False, case=False)]
+        
+        if not matching_rows.empty:
+            zrif = matching_rows.iloc[0]['zRIF']
+            content_id = matching_rows.iloc[0]['Content ID']
+            return zrif if pd.notna(zrif) and len(str(zrif).strip()) > 0 else None, content_id
+        
+        return None, None
+    except Exception as e:
+        print(f"Error in filename lookup for {tsv_file}: {e}")
+        return None, None
 
-        # Find the row that contains a partial match for the search text in the specified field
-        matching_row = data[data[field_name].str.contains(search_text, na=False)]
+def try_all_tsv_files_for_lookup(content_id, pkg_filename):
+    """Try to find zRIF in any TSV file if content type detection fails"""
+    for content_type in ['games', 'dlcs', 'themes']:
+        # Try Content ID lookup first
+        zrif = lookup_zrif_by_content_id(content_id, content_type)
+        if zrif:
+            return zrif, content_type
+        
+        # Try filename lookup as fallback
+        zrif, found_content_id = lookup_zrif_by_pkg_filename(pkg_filename, content_type)
+        if zrif:
+            return zrif, content_type
+    
+    return None, None
 
-        if len(matching_row) > 0:
-            # Get the value of the 'zRIF' field from the matching row
-            zrif_value = matching_row[zrif_field].values[0]
+def extract_content_id_from_pkg(pkg_path):
+    """
+    Try to extract Content ID from PKG file path or name
+    This is a heuristic approach - you might need to adjust based on your file naming
+    """
+    pkg_filename = os.path.basename(pkg_path)
+    
+    # Common patterns for Content ID in filenames
+    patterns = [
+        r'([A-Z]{4}\d{5}_\d{2})',  # Standard format like PCSA00001_00
+        r'([A-Z]{2}\d{4}-[A-Z]{4}\d{5}_\d{2})',  # With region prefix
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, pkg_filename)
+        if match:
+            return match.group(1)
+    
+    return None
 
-            if len(zrif_value) > 0:
-                return zrif_value
-            else:
-                return None
-        else:
-            return None
-    except:
-        return None
-
-
-def install_pkg(vita3k_prog_path, pkg_file_path, zrif):
-    global list_pkg_install_fail
-
+def delete_pkg_file(pkg_file_path, content_type):
+    """Safely delete PKG file after successful installation"""
     try:
-        print("Installing pkg=%s, zrif=%s" % (pkg_file_path, zrif))
-        executable_path = vita3k_prog_path
-        arguments = [ "--pkg", pkg_file_path, "--zrif", zrif ]
+        pkg_filename = os.path.basename(pkg_file_path)
+        print(f"🗑️  Deleting successfully installed PKG: {pkg_filename}")
+        os.remove(pkg_file_path)
+        stats[content_type]['deleted'].append(pkg_filename)
+        print(f"✓ Successfully deleted: {pkg_filename}")
+        return True
+    except Exception as e:
+        print(f"✗ Failed to delete {pkg_filename}: {e}")
+        return False
 
-        command = [executable_path] + arguments
-
-        print("command:")
-        print(command)
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, universal_newlines=True)
-        # Read and print the output in real-time
-        for line in process.stdout:
-            # uncomment to print out each line in real time
-            # print(line, end='')
-
-            # Check if the word 'exception' is present in the output
-            if 'exception' in line.lower():
-                # Store the command in a list
-                error_command = command
-
-                list_pkg_install_fail.append(pkg_file_path)
-
-                # Handle the error here
-                print(f"Exception occurred while executing the command: {error_command}")
-                break
-        # Wait for the process to finish
-        process.wait()
-
-    except subprocess.CalledProcessError as e:
-        # Store the command in a list
-        error_command = command
-
-        # Handle the error here
-        list_pkg_install_fail.append(pkg_file_path)
-        print(f"Error occurred while executing the command: {error_command}")
-        print(f"Error message: {e}")
-
-# Extract only the 'Game Name' until just before left bracket. E.g. 'Access Denied (USA)' will return 'Access Denied'
-def extract_text(text):
-    # Extract text until just before the left bracket
-    pattern = r"^(.*?)\s*\("
-    matches = re.match(pattern, text)
-
-    if matches:
-        extracted_text = matches.group(1)
-        return extracted_text
-   
-if __name__ == "__main__":
-
-    # Assuming the folder has the structure of 'Game Name (Region)/game.pkg'
-    for dirpath,_,filenames in os.walk(INPUT_PKG_FOLDER):
-        for f in filenames:
-            pkg_file_path = os.path.abspath(os.path.join(dirpath, f))
+def install_pkg(vita3k_prog_path, pkg_file_path, zrif, content_type):
+    """Install PKG with proper error handling and Linux compatibility"""
+    try:
+        print(f"Installing {content_type[:-1]}: {os.path.basename(pkg_file_path)}")
+        print(f"zRIF: {zrif}")
+        
+        # Ensure the executable is executable
+        if not os.access(vita3k_prog_path, os.X_OK):
+            print(f"Warning: {vita3k_prog_path} is not executable. Attempting to make it executable...")
+            try:
+                os.chmod(vita3k_prog_path, 0o755)
+            except Exception as e:
+                print(f"Failed to make executable: {e}")
+                stats[content_type]['failed'].append(os.path.basename(pkg_file_path))
+                return False
+        
+        # Build command
+        command = [vita3k_prog_path, "--pkg", pkg_file_path, "--zrif", zrif]
+        
+        print(f"Command: {' '.join(command)}")
+        
+        # Set up environment for Linux compatibility
+        env = os.environ.copy()
+        env['LC_ALL'] = 'C'  # Ensure consistent locale
+        
+        # Execute with timeout to prevent hanging
+        process = subprocess.Popen(
+            command, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            env=env
+        )
+        
+        try:
+            stdout, stderr = process.communicate(timeout=300)  # 5 minute timeout
             
+            # Check for success/failure indicators
+            if process.returncode == 0:
+                if 'exception' not in stdout.lower() and 'error' not in stderr.lower():
+                    stats[content_type]['success'].append(os.path.basename(pkg_file_path))
+                    print(f"✓ Successfully installed {os.path.basename(pkg_file_path)}")
+                    
+                    # Auto-delete the PKG file after successful installation
+                    delete_pkg_file(pkg_file_path, content_type)
+                    
+                    return True
+            
+            # If we get here, something went wrong
+            print(f"✗ Installation failed for {os.path.basename(pkg_file_path)}")
+            if stderr:
+                print(f"Error output: {stderr}")
+            stats[content_type]['failed'].append(os.path.basename(pkg_file_path))
+            return False
+            
+        except subprocess.TimeoutExpired:
+            process.kill()
+            print(f"✗ Installation timed out for {os.path.basename(pkg_file_path)}")
+            stats[content_type]['failed'].append(os.path.basename(pkg_file_path))
+            return False
+            
+    except Exception as e:
+        print(f"✗ Exception during installation of {os.path.basename(pkg_file_path)}: {e}")
+        stats[content_type]['failed'].append(os.path.basename(pkg_file_path))
+        return False
+
+def extract_game_name(folder_name):
+    """Extract clean game name from folder name"""
+    # Remove region info in parentheses
+    pattern = r"^(.*?)\s*\("
+    match = re.match(pattern, folder_name)
+    return match.group(1).strip() if match else folder_name.strip()
+
+def extract_content_id_from_pkg(pkg_path):
+    """
+    Extract Content ID from PKG filename
+    Example: UP9000-PCSA00011_00-PDUSAC00ARMYPACK.pkg -> UP9000-PCSA00011_00-PDUSAC00ARMYPACK
+    """
+    pkg_filename = os.path.basename(pkg_path)
+    
+    # Remove .pkg extension
+    content_id = os.path.splitext(pkg_filename)[0]
+    
+    return content_id
+
+def process_pkg_files():
+    """Process all PKG files in the input directory - Games first, then DLCs, then Themes"""
+    if not os.path.exists(INPUT_PKG_FOLDER):
+        print(f"Error: Input folder {INPUT_PKG_FOLDER} does not exist!")
+        return
+    
+    if not os.path.exists(VITA3K_PROG_PATH):
+        print(f"Error: Vita3K executable {VITA3K_PROG_PATH} does not exist!")
+        return
+    
+    # Check which TSV files exist
+    existing_tsv_files = []
+    for content_type, tsv_file in TSV_FILES.items():
+        if os.path.exists(tsv_file):
+            existing_tsv_files.append(content_type)
+        else:
+            print(f"Warning: {tsv_file} not found - {content_type} won't be processed")
+    
+    if not existing_tsv_files:
+        print("Error: No TSV files found!")
+        return
+    
+    print(f"Available TSV files for: {', '.join(existing_tsv_files)}")
+    
+    # Find all PKG files and categorize them
+    pkg_files_by_type = {'games': [], 'dlcs': [], 'themes': []}
+    
+    for root, dirs, files in os.walk(INPUT_PKG_FOLDER):
+        for file in files:
+            if file.lower().endswith('.pkg'):
+                pkg_file_path = os.path.join(root, file)
+                
+                # Extract content ID to determine type
+                content_id = extract_content_id_from_pkg(pkg_file_path)
+                content_type = get_content_type(content_id) if content_id else 'games'
+                
+                pkg_files_by_type[content_type].append(pkg_file_path)
+    
+    total_files = sum(len(files) for files in pkg_files_by_type.values())
+    print(f"Found {total_files} PKG files:")
+    print(f"  Games: {len(pkg_files_by_type['games'])}")
+    print(f"  DLCs: {len(pkg_files_by_type['dlcs'])}")
+    print(f"  Themes: {len(pkg_files_by_type['themes'])}")
+    print(SEP)
+    
+    # Process in order: Games first, then DLCs, then Themes
+    install_order = ['games', 'dlcs', 'themes']
+    
+    for content_type in install_order:
+        if not pkg_files_by_type[content_type]:
+            continue
+            
+        print(f"\n{'='*60}")
+        print(f"INSTALLING {content_type.upper()}")
+        print(f"{'='*60}")
+        
+        for pkg_file_path in pkg_files_by_type[content_type]:
+            pkg_filename = os.path.basename(pkg_file_path)
             folder_name = os.path.basename(os.path.dirname(pkg_file_path))
-            game_name = extract_text(folder_name)
-            zrif = lookup_zrif_by_pkg_direct_link(TSV_FILE, f)
-
-            if zrif is not None:
-                print("zRIF for game %s =%s" % (game_name, zrif))
-                install_pkg(VITA3K_PROG_PATH, pkg_file_path, zrif)
-                list_pkg_install_success.append(game_name)
-
+            game_name = extract_game_name(folder_name)
+            
+            print(f"Processing {content_type[:-1]}: {pkg_filename}")
+            
+            # Extract Content ID
+            content_id = extract_content_id_from_pkg(pkg_file_path)
+            zrif = None
+            
+            if content_id:
+                print(f"Content ID: {content_id}")
+                # Try lookup in the appropriate TSV file
+                zrif = lookup_zrif_by_content_id(content_id, content_type)
+            
+            # If primary lookup failed, try all TSV files
+            if not zrif:
+                print("Primary lookup failed, searching all TSV files...")
+                zrif, found_type = try_all_tsv_files_for_lookup(content_id, pkg_filename)
+                if found_type and found_type != content_type:
+                    print(f"Found in {found_type} TSV file instead of {content_type}")
+                    content_type = found_type
+            
+            if zrif:
+                print(f"Found zRIF for {content_type[:-1]}: {game_name}")
+                install_pkg(VITA3K_PROG_PATH, pkg_file_path, zrif, content_type)
             else:
-                print("Failed to find zrif for game=%s" % game_name)
-                list_games_no_matching_zrif.append(game_name)        
+                print(f"✗ No zRIF found for {content_type[:-1]}: {game_name}")
+                stats[content_type]['no_zrif'].append(game_name)
+            
+            print(SEP)
 
+def print_summary():
+    """Print installation summary"""
+    print("\n" + "=" * 60)
+    print("INSTALLATION SUMMARY")
+    print("=" * 60)
+    
+    total_success = sum(len(stats[t]['success']) for t in stats)
+    total_failed = sum(len(stats[t]['failed']) for t in stats)
+    total_no_zrif = sum(len(stats[t]['no_zrif']) for t in stats)
+    total_deleted = sum(len(stats[t]['deleted']) for t in stats)
+    
+    print(f"Total processed: {total_success + total_failed + total_no_zrif}")
+    print(f"Successfully installed: {total_success}")
+    print(f"Failed to install: {total_failed}")
+    print(f"No zRIF found: {total_no_zrif}")
+    print(f"PKG files deleted: {total_deleted}")
+    print()
+    
+    for content_type in ['games', 'dlcs', 'themes']:
+        if any(stats[content_type].values()):
+            print(f"{content_type.upper()}:")
+            print(f"  ✓ Successful: {len(stats[content_type]['success'])}")
+            print(f"  ✗ Failed: {len(stats[content_type]['failed'])}")
+            print(f"  ? No zRIF: {len(stats[content_type]['no_zrif'])}")
+            print(f"  🗑️  Deleted: {len(stats[content_type]['deleted'])}")
+            
+            if stats[content_type]['failed']:
+                print(f"  Failed {content_type}:")
+                for item in stats[content_type]['failed']:
+                    print(f"    - {item}")
+            
+            if stats[content_type]['no_zrif']:
+                print(f"  {content_type.title()} without zRIF:")
+                for item in stats[content_type]['no_zrif']:
+                    print(f"    - {item}")
+            
+            if stats[content_type]['deleted']:
+                print(f"  Deleted {content_type}:")
+                for item in stats[content_type]['deleted']:
+                    print(f"    - {item}")
+            print()
 
+if __name__ == "__main__":
+    print("Vita3K PKG Installer with Auto-Delete")
+    print("Supports Games, DLCs, and Themes")
+    print("⚠️  PKG files will be automatically deleted after successful installation!")
     print(SEP)
-    print("Summary")
-    print(SEP)
-    print("Finished installing %d pkg!" % len(list_pkg_install_success))
-    print("Failed to install %d pkg!" % len(list_pkg_install_fail))
-    for _ in list_pkg_install_fail:
-        print(_)
-
-    print("%d games with no matching zrif!" % len(list_games_no_matching_zrif))
-    for _ in list_games_no_matching_zrif:
-        print(_)
+    
+    try:
+        process_pkg_files()
+        print_summary()
+    except KeyboardInterrupt:
+        print("\n\nInstallation interrupted by user")
+        print_summary()
+    except Exception as e:
+        print(f"\nUnexpected error: {e}")
+        print_summary()
 
 # EOF
