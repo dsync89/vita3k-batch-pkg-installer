@@ -1,24 +1,77 @@
-# vita3k-batch-pkg-installer
-Batch install pkg files for vita3k with zrif downloaded from NoPayStation
+📦 vita3k-batch-pkg-installer
 
-Note:
-You must use Vita3k from release https://github.com/Vita3K/Vita3K/commit/a5b957ea2af529c9eede5056a9e6b11e293d9166 and above. So basically all release after July 11 will work as it fixes the issue where the game will always installed to your User/Roaming folder instead of the emulator path (which might be a custom path). If you refuse to update, you can either 1) create ntfs/symbolic link for the ux0 folder in your Roaming folder, or 2) move all the ux0 folder from Roaming to your Vita emulator data folder.
+Batch install .pkg files into Vita3K with zRIF codes sourced from NoPayStation TSVs — now with GUI, config saving, and cross-platform support.
+✨ Features
 
-After batch install, make sure to click 'Refresh' button at the top right to refresh the game list!
+    ✅ Automatic batch installation of .pkg games, DLCs, and themes.
 
-Your input folder must be structured in the format of `Game Folder (Region)/Game.pkg` for best result.
+    ✅ Matches Content ID to zRIF from NoPayStation .tsv files.
 
-It will store the list of game/pkg for games that failed to install, either a missing zRIF when trying to match the game or error during installation.
+    ✅ Deletes installed PKG files after successful install.
 
-For the record, even using batch job, it took 3 full days to fully import all 1824 titles to a USB3 connected HDD @7200RPM. Imagine doing it manually via the GUI for each of these titles individually!
+    ✅ GUI for selecting .pkg folder and Vita3K executable.
 
-Example output after running
-```
-...
-------------------------------------------
-Summary
-------------------------------------------
-Finished installing 2 pkg!
-Failed to install 0 pkg!
-0 games with no matching zrif!
-```
+    ✅ Remembers your paths using a local config.json.
+
+    ✅ Live logs shown in GUI.
+
+    ✅ Cross-platform: Windows & Linux compatible (via pathlib).
+
+📷 Screenshot
+
+    GUI mode with automatic path detection and logs:
+    ![image](https://github.com/user-attachments/assets/3e094f68-a5de-45f8-9456-bb317e5ac399)
+
+📥 Requirements
+
+    Vita3K release after July 11, 2023
+    Older versions may incorrectly install games to the Roaming directory instead of the emulator path.
+
+📁 Folder Structure
+
+Your PKG folder should follow this structure:
+
+/your/pkg/folder/
+├── Game Name (USA)/
+│   └── PCSA00001.pkg
+├── Game Name 2 (JPN)/
+│   └── PCSG00002.pkg
+
+    Folder name format helps with accurate game name detection and cleaner logs.
+
+🧠 Notes on Vita3K
+
+If you are not using the recommended Vita3K release or newer:
+
+    ❗ Games may install to AppData/Roaming/Vita3K instead of your custom path.
+
+    Workarounds:
+
+        Use NTFS/symbolic links to redirect ux0 from Roaming.
+
+        Manually move installed ux0 contents from Roaming to your custom Vita3K folder.
+
+🛠 Usage
+🖥 GUI Mode (Recommended)
+
+    Launch gui_launcher.py
+
+    Select:
+
+        your .pkg root folder
+
+        the Vita3K executable
+
+    Click Start Installation
+
+    Wait for the logs and check results!
+
+The tool will:
+
+    Auto-scan and sort games/DLCs/themes.
+
+    Lookup zRIF from TSV files in /tsv.
+
+    Install and delete .pkg files after success.
+
+    Track failed or missing zRIF entries for review.
