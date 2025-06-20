@@ -27,7 +27,7 @@ Batch install `.pkg` files into **Vita3K** with `zRIF` codes — now with **GUI*
 - **Vita3K build after [July 11, 2023](https://github.com/Vita3K/Vita3K/commit/a5b957ea2af529c9eede5056a9e6b11e293d9166)**  
   Older versions will install games to `AppData/Roaming/Vita3K` instead of your configured path.
 - Python Installed
-- pip install -r requirements.txt
+- `pip install -r requirements.txt`
 
 ---
 
