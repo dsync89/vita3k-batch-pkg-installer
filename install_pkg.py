@@ -6,13 +6,9 @@ import re
 from pathlib import Path
 
 # Configuration
-TSV_FILES = {
-    'games': "/home/relyf/Tools/vita3k-batch-pkg-installer-main/PSV_GAMES.tsv",
-    'dlcs': "/home/relyf/Tools/vita3k-batch-pkg-installer-main/PSV_DLCS.tsv",
-    'themes': "/home/relyf/Tools/vita3k-batch-pkg-installer-main/PSV_THEMES.tsv"
-}
-INPUT_PKG_FOLDER = "/home/relyf/Tools/NPS/PKG"
-VITA3K_PROG_PATH = "/home/relyf/Vita3K/Vita3K"
+TSV_FILES = {}
+INPUT_PKG_FOLDER = ""
+VITA3K_PROG_PATH = ""
 
 # Statistics tracking
 stats = {
